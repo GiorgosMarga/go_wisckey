@@ -11,7 +11,7 @@ func TestInsert(t *testing.T) {
 
 	for range 10 {
 		k := rand.Intn(899)
-		if err := a.Insert(fmt.Appendf(nil, "%03d", 100+k), nil); err != nil {
+		if err := a.Insert(MemtableEntry{Key: fmt.Appendf(nil, "%03d", 100+k), VLogId: 0, VLogOffset: 0}); err != nil {
 			t.Fatal(err)
 		}
 	}

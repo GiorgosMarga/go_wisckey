@@ -2,6 +2,7 @@ package lsm
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 )
 
@@ -11,26 +12,41 @@ var (
 
 type MemtableEntry struct {
 	Key        []byte
-	VLogId     int
-	VLogOffset int
+	VLogId     int64
+	VLogOffset int64
+}
+
+func (me *MemtableEntry) Encode() []byte {
+	buf := make([]byte, 24+len(me.Key))
+	offset := 0
+	binary.LittleEndian.PutUint64(buf[offset:], uint64(len(me.Key)))
+	offset += 8
+	copy(buf[offset:], me.Key)
+	offset += len(me.Key)
+	binary.LittleEndian.PutUint64(buf[offset:], uint64(me.VLogId))
+	offset += 8
+	binary.LittleEndian.PutUint64(buf[offset:], uint64(me.VLogOffset))
+	return buf
 }
 
 type Memtable interface {
 	// Insert key + vlog id + vlog offset
 	Insert(MemtableEntry) error
 	Read([]byte) (MemtableEntry, error)
+	GetEntries() []MemtableEntry
 }
 
 type node struct {
 	key        []byte
-	vlogId     int
-	vlogOffset int
+	vlogId     int64
+	vlogOffset int64
 	height     int
 	left       *node
 	right      *node
 }
 type AVL struct {
-	root *node
+	root  *node
+	items int
 }
 
 func NewAVL() Memtable {
@@ -43,9 +59,10 @@ func (a *AVL) Insert(entry MemtableEntry) error {
 		return err
 	}
 	a.root = n
+	a.items++
 	return nil
 }
-func (a *AVL) insert(curr *node, key []byte, id, offset int) (*node, error) {
+func (a *AVL) insert(curr *node, key []byte, id, offset int64) (*node, error) {
 	if curr == nil {
 		return &node{
 			key:        key,
@@ -109,6 +126,20 @@ func (a *AVL) Read(key []byte) (MemtableEntry, error) {
 		}
 	}
 	return MemtableEntry{}, fmt.Errorf("%w: %s\n", ErrKeyNotFound, string(key))
+}
+
+func (a *AVL) GetEntries() []MemtableEntry {
+	entries := make([]MemtableEntry, 0, a.items)
+	a.getEntries(a.root, entries)
+	return entries
+}
+func (a *AVL) getEntries(curr *node, entries []MemtableEntry) {
+	if curr == nil {
+		return
+	}
+	a.getEntries(curr.left, entries)
+	entries = append(entries, MemtableEntry{Key: curr.key, VLogId: curr.vlogId, VLogOffset: curr.vlogOffset})
+	a.getEntries(curr.right, entries)
 }
 
 //	               n               l          l
