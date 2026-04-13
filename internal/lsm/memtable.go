@@ -132,21 +132,20 @@ func (a *AVL) Read(key []byte) (*MemtableEntry, error) {
 		}
 	}
 
-	return &MemtableEntry{}, fmt.Errorf("%w: %s\n", ErrKeyNotFound, string(key))
+	return nil, fmt.Errorf("%w: %s\n", ErrKeyNotFound, string(key))
 }
 
 func (a *AVL) GetEntries() []*MemtableEntry {
-	entries := make([]*MemtableEntry, 0, a.items)
-	a.getEntries(a.root, entries)
-	return entries
+	return a.getEntries(a.root, make([]*MemtableEntry, 0, a.items))
 }
-func (a *AVL) getEntries(curr *node, entries []*MemtableEntry) {
+func (a *AVL) getEntries(curr *node, entries []*MemtableEntry) []*MemtableEntry {
 	if curr == nil {
-		return
+		return entries
 	}
-	a.getEntries(curr.left, entries)
+	entries = a.getEntries(curr.left, entries)
 	entries = append(entries, &MemtableEntry{Key: curr.key, VLogId: curr.vlogId, VLogOffset: curr.vlogOffset})
-	a.getEntries(curr.right, entries)
+	entries = a.getEntries(curr.right, entries)
+	return entries
 }
 
 //	               n               l          l

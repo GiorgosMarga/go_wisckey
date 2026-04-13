@@ -64,7 +64,7 @@ func (lsm *LSM) Get(key []byte) (*MemtableEntry, error) {
 	}
 
 	for _, sstableFile := range sstables {
-		sstable, err := os.Open(sstableFile.Name())
+		sstable, err := os.Open(fmt.Sprintf("../../sstables/%s", sstableFile.Name()))
 		if err != nil {
 			return nil, err
 		}
@@ -75,6 +75,7 @@ func (lsm *LSM) Get(key []byte) (*MemtableEntry, error) {
 			}
 		}
 		if entry != nil {
+			fmt.Println("Found in sstable")
 			return entry, nil
 		}
 	}
@@ -119,7 +120,8 @@ func (lsm *LSM) searchSSTable(sstable *os.File, targetKey []byte) (*MemtableEntr
 }
 
 func (lsm *LSM) writeSSTable() error {
-	filename := path.Join("sstables", fmt.Sprintf("%d", time.Now().UnixMicro()))
+	filename := path.Join(
+		"..", "..", "sstables", fmt.Sprintf("%d", time.Now().UnixMicro()))
 
 	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY, 0o666)
 	if err != nil {
@@ -130,10 +132,7 @@ func (lsm *LSM) writeSSTable() error {
 
 	for _, entry := range entries {
 		entryBuf := entry.Encode()
-		buf := make([]byte, 2+len(entryBuf))
-		binary.LittleEndian.PutUint16(buf, uint16(len(entryBuf)))
-		copy(buf[2:], entryBuf)
-		if _, err := f.Write(buf); err != nil {
+		if _, err := f.Write(entryBuf); err != nil {
 			return err
 		}
 	}
