@@ -6,26 +6,29 @@ import (
 )
 
 type DB struct {
-	lsm  *lsm.LSM
-	vlog *vlog.VLog
+	lsm         *lsm.LSM
+	vlogManager *vlog.Manager
 }
 
-func NewDB() (*DB, error) {
-	v, err := vlog.NewVLog()
-	if err != nil {
-		return nil, err
-	}
+func NewDB() *DB {
 	return &DB{
-		vlog: v,
-		lsm:  lsm.NewLSM(4096),
-	}, nil
+		vlogManager: vlog.NewManager(10),
+		lsm:         lsm.NewLSM(4096),
+	}
 }
 
 func (db *DB) Insert(key, value []byte) error {
-	offset, err := db.vlog.Append(value)
+	vLogId, offset, err := db.vlogManager.Append(key, value)
 	if err != nil {
 		return err
 	}
 
-	return db.lsm.Insert(key, 0, offset)
+	return db.lsm.Insert(key, vLogId, offset)
+}
+func (db *DB) Read(key []byte) ([]byte, error) {
+	entry, err := db.lsm.Get(key)
+	if err != nil {
+		return nil, err
+	}
+	return db.vlogManager.Read(entry.VLogId, entry.VLogOffset)
 }

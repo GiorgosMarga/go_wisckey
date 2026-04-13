@@ -2,11 +2,16 @@ package vlog
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"hash/crc32"
 	"os"
 	"path"
 	"sync"
-	"time"
+)
+
+var (
+	ErrInvalidCRC = errors.New("invalid crc")
 )
 
 type VLog struct {
@@ -17,8 +22,7 @@ type VLog struct {
 	head int64
 }
 
-func NewVLog() (*VLog, error) {
-	id := time.Now().UnixMilli()
+func NewVLog(id int64) (*VLog, error) {
 	filepath := path.Join("../../", "vlogs", fmt.Sprintf("%d", id))
 
 	f, err := os.OpenFile(filepath, os.O_CREATE|os.O_RDWR, 0o666)
@@ -34,40 +38,76 @@ func NewVLog() (*VLog, error) {
 	}, nil
 }
 
-func (v *VLog) Append(data []byte) (int64, error) {
+func (v *VLog) Append(key, value []byte) (int64, error) {
 	v.mtx.Lock()
 	defer v.mtx.Unlock()
 
-	buf := make([]byte, 2+len(data))
-	binary.LittleEndian.PutUint16(buf, uint16(len(data)))
-	copy(buf, data)
+	crc := crc32.ChecksumIEEE(append(key, value...))
 
-	offset := v.head
+	buf := make([]byte, 8+len(key)+len(value)) // keysize 2 + valsize 2 + crc 4
+	offset := 0
+	binary.LittleEndian.PutUint16(buf[offset:], uint16(len(key)))
+	offset += 2
+	copy(buf[offset:], key)
+	offset += len(key)
+	binary.LittleEndian.PutUint16(buf[offset:], uint16(len(value)))
+	offset += 2
+	copy(buf[offset:], value)
+	offset += len(value)
+	binary.LittleEndian.PutUint32(buf[offset:], crc)
+
+	vlogOffset := v.head
 	if _, err := v.f.WriteAt(buf, v.head); err != nil {
 		return 0, err
 	}
 
 	v.head += int64(len(buf))
-	return offset, nil
+	return vlogOffset, nil
 }
-func (v *VLog) Read(offset int64) ([]byte, error) {
+func (v *VLog) Read(vLogOffset int64) ([]byte, error) {
 	buf := make([]byte, 2)
-	n, err := v.f.ReadAt(buf, int64(offset))
+
+	// read key
+	var readOffset int64 = 0
+	n, err := v.f.ReadAt(buf, vLogOffset+readOffset)
 	if err != nil {
 		return nil, err
 	}
-	var dataLen uint16
-	binary.LittleEndian.Uint16(buf[:n])
-	data := make([]byte, dataLen)
+	readOffset += int64(n)
+	keyLen := binary.LittleEndian.Uint16(buf[:n])
+	key := make([]byte, keyLen)
 
-	n, err = v.f.ReadAt(data, offset+2)
+	n, err = v.f.ReadAt(key, vLogOffset+readOffset)
 	if err != nil {
 		return nil, err
 	}
-
-	if n != int(dataLen) {
+	readOffset += int64(n)
+	if n != int(keyLen) {
 		return nil, fmt.Errorf("could not read the entire data")
 	}
+	n, err = v.f.ReadAt(buf, vLogOffset+readOffset)
+	if err != nil {
+		return nil, err
+	}
+	readOffset += int64(n)
+	valueLen := binary.LittleEndian.Uint16(buf[:n])
+	value := make([]byte, valueLen)
 
-	return data, nil
+	n, err = v.f.ReadAt(value, vLogOffset+readOffset)
+	if err != nil {
+		return nil, err
+	}
+	readOffset += int64(n)
+
+	crcBuf := make([]byte, 4)
+	_, err = v.f.ReadAt(crcBuf, vLogOffset+readOffset)
+	crc := binary.LittleEndian.Uint32(crcBuf)
+	if err != nil {
+		return nil, err
+	}
+
+	if crc != crc32.ChecksumIEEE(append(key, value...)) {
+		return nil, ErrInvalidCRC
+	}
+	return value, nil
 }

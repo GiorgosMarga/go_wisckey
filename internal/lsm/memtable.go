@@ -32,8 +32,9 @@ func (me *MemtableEntry) Encode() []byte {
 type Memtable interface {
 	// Insert key + vlog id + vlog offset
 	Insert(MemtableEntry) error
-	Read([]byte) (MemtableEntry, error)
-	GetEntries() []MemtableEntry
+	Read([]byte) (*MemtableEntry, error)
+	GetEntries() []*MemtableEntry
+	Size() int
 }
 
 type node struct {
@@ -45,14 +46,17 @@ type node struct {
 	right      *node
 }
 type AVL struct {
-	root  *node
-	items int
+	root     *node
+	items    int
+	currSize int
 }
 
 func NewAVL() Memtable {
 	return &AVL{}
 }
-
+func (a *AVL) Size() int {
+	return a.currSize
+}
 func (a *AVL) Insert(entry MemtableEntry) error {
 	n, err := a.insert(a.root, entry.Key, entry.VLogId, entry.VLogOffset)
 	if err != nil {
@@ -60,6 +64,7 @@ func (a *AVL) Insert(entry MemtableEntry) error {
 	}
 	a.root = n
 	a.items++
+	a.currSize += len(entry.Key)
 	return nil
 }
 func (a *AVL) insert(curr *node, key []byte, id, offset int64) (*node, error) {
@@ -113,33 +118,34 @@ func (a *AVL) insert(curr *node, key []byte, id, offset int64) (*node, error) {
 	}
 	return curr, nil
 }
-func (a *AVL) Read(key []byte) (MemtableEntry, error) {
+func (a *AVL) Read(key []byte) (*MemtableEntry, error) {
 	curr := a.root
+	// check if entry is in the tree
 	for curr != nil {
 		switch bytes.Compare(curr.key, key) {
 		case 0:
-			return MemtableEntry{Key: key, VLogOffset: curr.vlogOffset, VLogId: curr.vlogId}, nil
+			return &MemtableEntry{Key: key, VLogOffset: curr.vlogOffset, VLogId: curr.vlogId}, nil
 		case 1:
 			curr = curr.left
 		case -1:
 			curr = curr.right
 		}
 	}
-	return MemtableEntry{}, fmt.Errorf("%w: %s\n", ErrKeyNotFound, string(key))
+
+	return nil, fmt.Errorf("%w: %s\n", ErrKeyNotFound, string(key))
 }
 
-func (a *AVL) GetEntries() []MemtableEntry {
-	entries := make([]MemtableEntry, 0, a.items)
-	a.getEntries(a.root, entries)
-	return entries
+func (a *AVL) GetEntries() []*MemtableEntry {
+	return a.getEntries(a.root, make([]*MemtableEntry, 0, a.items))
 }
-func (a *AVL) getEntries(curr *node, entries []MemtableEntry) {
+func (a *AVL) getEntries(curr *node, entries []*MemtableEntry) []*MemtableEntry {
 	if curr == nil {
-		return
+		return entries
 	}
-	a.getEntries(curr.left, entries)
-	entries = append(entries, MemtableEntry{Key: curr.key, VLogId: curr.vlogId, VLogOffset: curr.vlogOffset})
-	a.getEntries(curr.right, entries)
+	entries = a.getEntries(curr.left, entries)
+	entries = append(entries, &MemtableEntry{Key: curr.key, VLogId: curr.vlogId, VLogOffset: curr.vlogOffset})
+	entries = a.getEntries(curr.right, entries)
+	return entries
 }
 
 //	               n               l          l
