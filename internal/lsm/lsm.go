@@ -1,8 +1,11 @@
 package lsm
 
 import (
+	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"time"
@@ -42,8 +45,77 @@ func (lsm *LSM) Insert(key []byte, id, offset int64) error {
 	return nil
 }
 
-func (lsm *LSM) Get(key []byte) (MemtableEntry, error) {
-	return lsm.memtable.Read(key)
+func (lsm *LSM) Get(key []byte) (*MemtableEntry, error) {
+	entry, err := lsm.memtable.Read(key)
+	if err != nil {
+		if !errors.Is(err, ErrKeyNotFound) {
+			return nil, err
+		}
+	}
+	if entry != nil {
+		return entry, nil
+	}
+
+	// search in sstables
+
+	sstables, err := os.ReadDir("../../sstables")
+	if err != nil {
+		return nil, err
+	}
+
+	for _, sstableFile := range sstables {
+		sstable, err := os.Open(sstableFile.Name())
+		if err != nil {
+			return nil, err
+		}
+		entry, err := lsm.searchSSTable(sstable, key)
+		if err != nil {
+			if !errors.Is(err, ErrKeyNotFound) {
+				return nil, err
+			}
+		}
+		if entry != nil {
+			return entry, nil
+		}
+	}
+	return nil, ErrKeyNotFound
+}
+
+func (lsm *LSM) searchSSTable(sstable *os.File, targetKey []byte) (*MemtableEntry, error) {
+	var offset int64 = 0
+	for {
+		keyLenBuf := make([]byte, 8)
+		_, err := sstable.ReadAt(keyLenBuf, offset)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil, ErrKeyNotFound
+			}
+			return nil, err
+		}
+		offset += 8
+		keyLen := binary.LittleEndian.Uint64(keyLenBuf)
+		key := make([]byte, keyLen)
+		_, err = sstable.ReadAt(key, offset)
+		if err != nil {
+			return nil, err
+		}
+		offset += int64(keyLen)
+		if bytes.Equal(key, targetKey) {
+			buf := make([]byte, 16)
+			_, err = sstable.ReadAt(buf, offset)
+			if err != nil {
+				return nil, err
+			}
+			return &MemtableEntry{
+				Key:        targetKey,
+				VLogId:     int64(binary.LittleEndian.Uint64(buf)),
+				VLogOffset: int64(binary.LittleEndian.Uint64(buf[8:])),
+			}, nil
+		} else {
+			// skip entry
+			offset += 16 // 8 vlogid + 8 vlog offset
+		}
+	}
 }
 
 func (lsm *LSM) writeSSTable() error {
