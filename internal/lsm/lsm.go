@@ -75,7 +75,6 @@ func (lsm *LSM) Get(key []byte) (*MemtableEntry, error) {
 			}
 		}
 		if entry != nil {
-			fmt.Println("Found in sstable")
 			return entry, nil
 		}
 	}

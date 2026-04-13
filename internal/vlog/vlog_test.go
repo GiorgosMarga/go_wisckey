@@ -6,7 +6,7 @@ import (
 )
 
 func TestInsert(t *testing.T) {
-	vlog, err := NewVLog()
+	vlog, err := NewVLog(1)
 	if err != nil {
 		t.Fatal(err)
 	}

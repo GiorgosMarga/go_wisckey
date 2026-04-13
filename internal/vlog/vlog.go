@@ -8,7 +8,6 @@ import (
 	"os"
 	"path"
 	"sync"
-	"time"
 )
 
 var (
@@ -23,8 +22,7 @@ type VLog struct {
 	head int64
 }
 
-func NewVLog() (*VLog, error) {
-	id := time.Now().UnixMilli()
+func NewVLog(id int64) (*VLog, error) {
 	filepath := path.Join("../../", "vlogs", fmt.Sprintf("%d", id))
 
 	f, err := os.OpenFile(filepath, os.O_CREATE|os.O_RDWR, 0o666)
