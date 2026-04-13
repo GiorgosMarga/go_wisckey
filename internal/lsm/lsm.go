@@ -10,7 +10,6 @@ import (
 
 type LSM struct {
 	memtable Memtable
-	currSize int
 	maxSize  int
 }
 
@@ -21,16 +20,15 @@ func NewLSM(maxSize int) *LSM {
 	}
 }
 
+// TODO: writeSSTable should not block the insert. A new memtable should be available for writing the data
 func (lsm *LSM) Insert(key []byte, id, offset int64) error {
 	// check if key fits in the lsm
-	if lsm.currSize+len(key) > lsm.maxSize {
+	if lsm.memtable.Size()+len(key) > lsm.maxSize {
 		// need flush current lsm in disk and create a new one
 		if err := lsm.writeSSTable(); err != nil {
 			return err
 		}
-
 		lsm.memtable = NewAVL()
-		lsm.currSize = 0
 	}
 
 	entry := MemtableEntry{
@@ -41,7 +39,6 @@ func (lsm *LSM) Insert(key []byte, id, offset int64) error {
 	if err := lsm.memtable.Insert(entry); err != nil {
 		return err
 	}
-	lsm.currSize += len(key)
 	return nil
 }
 

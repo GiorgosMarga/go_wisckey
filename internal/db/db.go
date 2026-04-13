@@ -22,10 +22,17 @@ func NewDB() (*DB, error) {
 }
 
 func (db *DB) Insert(key, value []byte) error {
-	offset, err := db.vlog.Append(value)
+	offset, err := db.vlog.Append(key, value)
 	if err != nil {
 		return err
 	}
 
 	return db.lsm.Insert(key, 0, offset)
+}
+func (db *DB) Read(key []byte) ([]byte, error) {
+	entry, err := db.lsm.Get(key)
+	if err != nil {
+		return nil, err
+	}
+	return db.vlog.Read(entry.VLogOffset)
 }

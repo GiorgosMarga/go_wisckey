@@ -34,6 +34,7 @@ type Memtable interface {
 	Insert(MemtableEntry) error
 	Read([]byte) (MemtableEntry, error)
 	GetEntries() []MemtableEntry
+	Size() int
 }
 
 type node struct {
@@ -45,14 +46,17 @@ type node struct {
 	right      *node
 }
 type AVL struct {
-	root  *node
-	items int
+	root     *node
+	items    int
+	currSize int
 }
 
 func NewAVL() Memtable {
 	return &AVL{}
 }
-
+func (a *AVL) Size() int {
+	return a.currSize
+}
 func (a *AVL) Insert(entry MemtableEntry) error {
 	n, err := a.insert(a.root, entry.Key, entry.VLogId, entry.VLogOffset)
 	if err != nil {
@@ -60,6 +64,7 @@ func (a *AVL) Insert(entry MemtableEntry) error {
 	}
 	a.root = n
 	a.items++
+	a.currSize += len(entry.Key)
 	return nil
 }
 func (a *AVL) insert(curr *node, key []byte, id, offset int64) (*node, error) {
