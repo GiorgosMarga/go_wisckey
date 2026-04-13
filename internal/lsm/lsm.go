@@ -9,6 +9,8 @@ import (
 	"os"
 	"path"
 	"time"
+
+	"github.com/GiorgosMarga/wisckey/internal/bloomfilter"
 )
 
 type LSM struct {
@@ -129,11 +131,26 @@ func (lsm *LSM) writeSSTable() error {
 	defer f.Close()
 	entries := lsm.memtable.GetEntries()
 
+	bf := bloomfilter.NewBloomFilter(bloomfilter.DefaultHash(0x9747b28c), bloomfilter.DefaultHash(0x85ebca6b), bloomfilter.DefaultHash(0xc2b2ae35))
+
 	for _, entry := range entries {
+		bf.Insert(entry.Key)
 		entryBuf := entry.Encode()
 		if _, err := f.Write(entryBuf); err != nil {
 			return err
 		}
 	}
+	// write footer
+	bfOffset, err := f.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return err
+	}
+	encodedFilter := bf.Encode()
+	if _, err := f.WriteAt(encodedFilter, bfOffset); err != nil {
+		return err
+	}
+
+	// implement sparse index
+
 	return f.Sync()
 }
