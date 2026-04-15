@@ -11,7 +11,7 @@ type BloomFilter struct {
 	filter    uint64
 }
 
-func NewBloomFilter(hashFuncs ...HashFunc) *BloomFilter {
+func New(hashFuncs ...HashFunc) *BloomFilter {
 	funcs := make([]HashFunc, 0, len(hashFuncs))
 	funcs = append(funcs, hashFuncs...)
 	for i := len(funcs); i < 3; i++ {
@@ -22,6 +22,16 @@ func NewBloomFilter(hashFuncs ...HashFunc) *BloomFilter {
 	}
 }
 
+func NewFromBuf(buf []byte, hashFuncs ...HashFunc) *BloomFilter {
+	funcs := make([]HashFunc, 0, len(hashFuncs))
+	funcs = append(funcs, hashFuncs...)
+	for i := len(funcs); i < 3; i++ {
+		funcs = append(funcs, DefaultHash(uint32(i)))
+	}
+	bf := New(hashFuncs...)
+	bf.filter = binary.LittleEndian.Uint64(buf)
+	return bf
+}
 func (bf *BloomFilter) Insert(k []byte) {
 	for _, fn := range bf.hashFuncs {
 		pos := fn(k) % 64
@@ -39,10 +49,9 @@ func (bf *BloomFilter) MayExist(k []byte) bool {
 
 func (bf *BloomFilter) Encode() []byte {
 	buf := make([]byte, 8)
-	binary.LittleEndian.AppendUint64(buf, bf.filter)
+	binary.LittleEndian.PutUint64(buf, bf.filter)
 	return buf
 }
-
 func DefaultHash(seed uint32) HashFunc {
 	return func(b []byte) uint32 {
 		return MurMur3(b, seed)

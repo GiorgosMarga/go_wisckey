@@ -11,6 +11,13 @@ import (
 	"time"
 
 	"github.com/GiorgosMarga/wisckey/internal/bloomfilter"
+	sparseindex "github.com/GiorgosMarga/wisckey/internal/sparseIndex"
+)
+
+var (
+	h1 = bloomfilter.DefaultHash(0x9747b28c)
+	h2 = bloomfilter.DefaultHash(0x85ebca6b)
+	h3 = bloomfilter.DefaultHash(0xc2b2ae35)
 )
 
 type LSM struct {
@@ -79,15 +86,61 @@ func (lsm *LSM) Get(key []byte) (*MemtableEntry, error) {
 		if entry != nil {
 			return entry, nil
 		}
+		sstable.Close()
 	}
+	fmt.Println("Not found")
 	return nil, ErrKeyNotFound
 }
 
 func (lsm *LSM) searchSSTable(sstable *os.File, targetKey []byte) (*MemtableEntry, error) {
-	var offset int64 = 0
+	footer := make([]byte, 32)
+
+	if _, err := sstable.Seek(-32, io.SeekEnd); err != nil {
+		return nil, err
+	}
+
+	if _, err := sstable.Read(footer); err != nil {
+		return nil, err
+	}
+
+	bfOffset := binary.LittleEndian.Uint64(footer)
+	bfSize := binary.LittleEndian.Uint32(footer[8:])
+	sparseIdxOffset := binary.LittleEndian.Uint64(footer[12:])
+	sparseIdxSize := binary.LittleEndian.Uint32(footer[20:])
+	magicNumber := binary.LittleEndian.Uint64(footer[24:])
+
+	if magicNumber != 0xdeadbeefdeadbeef {
+		return nil, fmt.Errorf("invalid sstable file")
+	}
+
+	bfBuf := make([]byte, bfSize)
+	if _, err := sstable.ReadAt(bfBuf, int64(bfOffset)); err != nil {
+		return nil, err
+	}
+
+	bf := bloomfilter.NewFromBuf(bfBuf, h1, h2, h3)
+
+	if !bf.MayExist(targetKey) {
+		return nil, ErrKeyNotFound
+	}
+
+	sparseIdxBuf := make([]byte, sparseIdxSize)
+	if _, err := sstable.ReadAt(sparseIdxBuf, int64(sparseIdxOffset)); err != nil {
+		return nil, err
+	}
+	spIdx := sparseindex.NewFromBuf(sparseIdxBuf)
+
+	offset, err := spIdx.Get(targetKey[0])
+	if err != nil {
+		return nil, ErrKeyNotFound
+	}
 	for {
+		// bfOffset is where the bloomfilter data starts and where the key-vlogId-vlogOffset data ends
+		if offset >= bfOffset {
+			return nil, ErrKeyNotFound
+		}
 		keyLenBuf := make([]byte, 8)
-		_, err := sstable.ReadAt(keyLenBuf, offset)
+		_, err := sstable.ReadAt(keyLenBuf, int64(offset))
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				return nil, ErrKeyNotFound
@@ -97,14 +150,15 @@ func (lsm *LSM) searchSSTable(sstable *os.File, targetKey []byte) (*MemtableEntr
 		offset += 8
 		keyLen := binary.LittleEndian.Uint64(keyLenBuf)
 		key := make([]byte, keyLen)
-		_, err = sstable.ReadAt(key, offset)
+		_, err = sstable.ReadAt(key, int64(offset))
 		if err != nil {
 			return nil, err
 		}
-		offset += int64(keyLen)
-		if bytes.Equal(key, targetKey) {
+		offset += keyLen
+		switch bytes.Compare(key, targetKey) {
+		case 0:
 			buf := make([]byte, 16)
-			_, err = sstable.ReadAt(buf, offset)
+			_, err = sstable.ReadAt(buf, int64(offset))
 			if err != nil {
 				return nil, err
 			}
@@ -113,9 +167,12 @@ func (lsm *LSM) searchSSTable(sstable *os.File, targetKey []byte) (*MemtableEntr
 				VLogId:     int64(binary.LittleEndian.Uint64(buf)),
 				VLogOffset: int64(binary.LittleEndian.Uint64(buf[8:])),
 			}, nil
-		} else {
+		case -1:
 			// skip entry
 			offset += 16 // 8 vlogid + 8 vlog offset
+		default:
+			// key doesnt exist
+			return nil, ErrKeyNotFound
 		}
 	}
 }
@@ -129,28 +186,57 @@ func (lsm *LSM) writeSSTable() error {
 		return err
 	}
 	defer f.Close()
+
 	entries := lsm.memtable.GetEntries()
 
-	bf := bloomfilter.NewBloomFilter(bloomfilter.DefaultHash(0x9747b28c), bloomfilter.DefaultHash(0x85ebca6b), bloomfilter.DefaultHash(0xc2b2ae35))
+	bf := bloomfilter.New(h1, h2, h3)
+	spIndex := sparseindex.New()
 
+	var offset int64 = 0
+	// TODO: consider using a bufio writer
 	for _, entry := range entries {
 		bf.Insert(entry.Key)
-		entryBuf := entry.Encode()
-		if _, err := f.Write(entryBuf); err != nil {
+		spIndex.Insert(entry.Key[0], uint64(offset))
+		n, err := f.WriteAt(entry.Encode(), offset)
+		if err != nil {
 			return err
 		}
+		offset += int64(n)
 	}
 	// write footer
-	bfOffset, err := f.Seek(0, io.SeekCurrent)
+	bfOffset := offset
+	bfB := bf.Encode()
+	n, err := f.WriteAt(bfB, offset)
 	if err != nil {
 		return err
 	}
-	encodedFilter := bf.Encode()
-	if _, err := f.WriteAt(encodedFilter, bfOffset); err != nil {
+	offset += int64(n)
+
+	// write sparse index
+	sparseOffset := offset
+	spB := spIndex.Encode()
+	n, err = f.WriteAt(spB, offset)
+	if err != nil {
 		return err
 	}
+	offset += int64(n)
 
-	// implement sparse index
+	footer := make([]byte, 0, 32)
 
+	// bloom filter metadata
+	footer = binary.LittleEndian.AppendUint64(footer, uint64(bfOffset))
+	footer = binary.LittleEndian.AppendUint32(footer, uint32(len(bfB)))
+
+	// sparse index metadata
+	footer = binary.LittleEndian.AppendUint64(footer, uint64(sparseOffset))
+	footer = binary.LittleEndian.AppendUint32(footer, uint32(len(spB)))
+
+	// magic number
+	footer = binary.LittleEndian.AppendUint64(footer, uint64(0xdeadbeefdeadbeef))
+
+	// write footer
+	if _, err := f.WriteAt(footer, offset); err != nil {
+		return err
+	}
 	return f.Sync()
 }
