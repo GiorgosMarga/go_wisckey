@@ -8,10 +8,10 @@ type HashFunc func([]byte) uint32
 
 type BloomFilter struct {
 	hashFuncs []HashFunc
-	filter    int64
+	filter    uint64
 }
 
-func NewBloomFilter(hashFuncs ...HashFunc) *BloomFilter {
+func New(hashFuncs ...HashFunc) *BloomFilter {
 	funcs := make([]HashFunc, 0, len(hashFuncs))
 	funcs = append(funcs, hashFuncs...)
 	for i := len(funcs); i < 3; i++ {
@@ -22,6 +22,16 @@ func NewBloomFilter(hashFuncs ...HashFunc) *BloomFilter {
 	}
 }
 
+func NewFromBuf(buf []byte, hashFuncs ...HashFunc) *BloomFilter {
+	funcs := make([]HashFunc, 0, len(hashFuncs))
+	funcs = append(funcs, hashFuncs...)
+	for i := len(funcs); i < 3; i++ {
+		funcs = append(funcs, DefaultHash(uint32(i)))
+	}
+	bf := New(hashFuncs...)
+	bf.filter = binary.LittleEndian.Uint64(buf)
+	return bf
+}
 func (bf *BloomFilter) Insert(k []byte) {
 	for _, fn := range bf.hashFuncs {
 		pos := fn(k) % 64
@@ -29,12 +39,18 @@ func (bf *BloomFilter) Insert(k []byte) {
 	}
 }
 func (bf *BloomFilter) MayExist(k []byte) bool {
-	var res int64 = 1
+	var res uint64 = 1
 	for _, fn := range bf.hashFuncs {
 		pos := fn(k) % 64
 		res &= (bf.filter & (1 << int64(pos))) >> pos
 	}
 	return res == 1
+}
+
+func (bf *BloomFilter) Encode() []byte {
+	buf := make([]byte, 8)
+	binary.LittleEndian.PutUint64(buf, bf.filter)
+	return buf
 }
 func DefaultHash(seed uint32) HashFunc {
 	return func(b []byte) uint32 {
