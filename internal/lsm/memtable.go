@@ -51,7 +51,7 @@ type AVL struct {
 	currSize int
 }
 
-func NewAVL() Memtable {
+func NewAVL() *AVL {
 	return &AVL{}
 }
 func (a *AVL) Size() int {

@@ -13,7 +13,7 @@ type DB struct {
 func NewDB() *DB {
 	return &DB{
 		vlogManager: vlog.NewManager(10),
-		lsm:         lsm.NewLSM(4096),
+		lsm:         lsm.NewLSM(8192),
 	}
 }
 
