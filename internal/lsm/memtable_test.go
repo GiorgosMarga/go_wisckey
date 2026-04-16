@@ -15,7 +15,6 @@ func TestInsert(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	tree := a.(*AVL)
-	tree.InOrder()
-	tree.PreOrder()
+	a.InOrder()
+	a.PreOrder()
 }

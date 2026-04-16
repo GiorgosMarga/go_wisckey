@@ -3,8 +3,6 @@ package lsm
 import (
 	"bytes"
 	"crypto/rand"
-	"fmt"
-	"strings"
 	"testing"
 )
 
@@ -15,9 +13,6 @@ func TestNewSSTable(t *testing.T) {
 		rand.Read(key)
 
 		if err := lsm.Insert(key, 0, 0); err != nil {
-			if strings.Contains(err.Error(), "exists") {
-				fmt.Printf("Key %x\n", key)
-			}
 			t.Fatal(err)
 		}
 	}
