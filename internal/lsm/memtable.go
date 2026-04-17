@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"sync"
+
+	"github.com/GiorgosMarga/wisckey/internal/log"
 )
 
 var (
@@ -36,6 +38,8 @@ type Memtable interface {
 	Read([]byte) (*MemtableEntry, error)
 	GetEntries() []*MemtableEntry
 	Size() int
+	DeleteLog() error
+	Close() error
 }
 
 type node struct {
@@ -46,24 +50,31 @@ type node struct {
 	left       *node
 	right      *node
 }
-type AVL struct {
+type AVLMemtable struct {
 	root     *node
 	items    int
 	currSize int
 	mtx      *sync.RWMutex
+	log      *log.Log
 }
 
-func NewAVL() *AVL {
-	return &AVL{
+func NewAVLMemtable() *AVLMemtable {
+	return &AVLMemtable{
 		mtx: &sync.RWMutex{},
 	}
 }
-func (a *AVL) Size() int {
+func (a *AVLMemtable) Size() int {
 	return a.currSize
 }
-func (a *AVL) Insert(entry MemtableEntry) error {
+func (a *AVLMemtable) Insert(entry MemtableEntry) error {
 	a.mtx.Lock()
 	defer a.mtx.Unlock()
+
+	// first write to log. Will skip for now since vLogs have both key and value so we can use it as WAL
+	// if err := a.log.Write(entry.Encode()); err != nil {
+	// 	return err
+	// }
+
 	n, err := a.insert(a.root, entry.Key, entry.VLogId, entry.VLogOffset)
 	if err != nil {
 		return err
@@ -73,7 +84,7 @@ func (a *AVL) Insert(entry MemtableEntry) error {
 	a.currSize += len(entry.Key)
 	return nil
 }
-func (a *AVL) insert(curr *node, key []byte, id, offset int64) (*node, error) {
+func (a *AVLMemtable) insert(curr *node, key []byte, id, offset int64) (*node, error) {
 	if curr == nil {
 		return &node{
 			key:        key,
@@ -124,7 +135,7 @@ func (a *AVL) insert(curr *node, key []byte, id, offset int64) (*node, error) {
 	}
 	return curr, nil
 }
-func (a *AVL) Read(key []byte) (*MemtableEntry, error) {
+func (a *AVLMemtable) Read(key []byte) (*MemtableEntry, error) {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
 	curr := a.root
@@ -143,12 +154,12 @@ func (a *AVL) Read(key []byte) (*MemtableEntry, error) {
 	return nil, fmt.Errorf("%w: %s\n", ErrKeyNotFound, string(key))
 }
 
-func (a *AVL) GetEntries() []*MemtableEntry {
+func (a *AVLMemtable) GetEntries() []*MemtableEntry {
 	a.mtx.RLock()
 	defer a.mtx.RUnlock()
 	return a.getEntries(a.root, make([]*MemtableEntry, 0, a.items))
 }
-func (a *AVL) getEntries(curr *node, entries []*MemtableEntry) []*MemtableEntry {
+func (a *AVLMemtable) getEntries(curr *node, entries []*MemtableEntry) []*MemtableEntry {
 	if curr == nil {
 		return entries
 	}
@@ -206,11 +217,11 @@ func (n *node) balanceFactor() int {
 	return n.left.getHeight() - n.right.getHeight()
 }
 
-func (a *AVL) InOrder() {
+func (a *AVLMemtable) InOrder() {
 	a.inorder(a.root)
 	fmt.Println()
 }
-func (a *AVL) inorder(curr *node) {
+func (a *AVLMemtable) inorder(curr *node) {
 	if curr == nil {
 		return
 	}
@@ -218,15 +229,21 @@ func (a *AVL) inorder(curr *node) {
 	fmt.Printf("%s ", string(curr.key))
 	a.inorder(curr.right)
 }
-func (a *AVL) PreOrder() {
+func (a *AVLMemtable) PreOrder() {
 	a.preorder(a.root)
 	fmt.Println()
 }
-func (a *AVL) preorder(curr *node) {
+func (a *AVLMemtable) preorder(curr *node) {
 	if curr == nil {
 		return
 	}
 	fmt.Printf("%s ", string(curr.key))
 	a.preorder(curr.left)
 	a.preorder(curr.right)
+}
+func (a *AVLMemtable) DeleteLog() error {
+	return a.log.Delete()
+}
+func (a *AVLMemtable) Close() error {
+	return nil
 }

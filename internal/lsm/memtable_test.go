@@ -7,7 +7,7 @@ import (
 )
 
 func TestInsert(t *testing.T) {
-	a := NewAVL()
+	a := NewAVLMemtable()
 
 	for range 10 {
 		k := rand.Intn(899)

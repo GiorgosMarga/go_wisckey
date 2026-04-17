@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/crc32"
+	"io"
 	"os"
 	"path"
 	"sync"
@@ -15,8 +16,8 @@ var (
 )
 
 type vlogEntry struct {
-	key []byte
-	val []byte
+	Key []byte
+	Val []byte
 }
 
 type VLog struct {
@@ -72,7 +73,7 @@ func (v *VLog) Read(vLogOffset int64) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return entry.val, nil
+	return entry.Val, nil
 }
 
 func (v *VLog) readEntry(vLogOffset int64) (*vlogEntry, error) {
@@ -124,7 +125,36 @@ func (v *VLog) readEntry(vLogOffset int64) (*vlogEntry, error) {
 		return nil, ErrInvalidCRC
 	}
 	return &vlogEntry{
-		key: key,
-		val: value,
+		Key: key,
+		Val: value,
 	}, nil
+}
+
+func (v *VLog) Recover() ([]*vlogEntry, error) {
+	entries := make([]*vlogEntry, 0)
+	var offset int64 = 0
+	for {
+		entry, err := v.readEntry(offset)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return entries, nil
+			}
+			return nil, err
+		}
+		entries = append(entries, entry)
+		offset += 8 + int64(len(entry.Key)+len(entry.Val))
+	}
+}
+func (v *VLog) Delete() error {
+	if err := v.f.Close(); err != nil {
+		return err
+	}
+
+	return os.Remove(v.f.Name())
+}
+func (v *VLog) Close() error {
+	if err := v.f.Sync(); err != nil {
+		return err
+	}
+	return v.f.Close()
 }

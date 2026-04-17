@@ -44,7 +44,7 @@ type LSM struct {
 func NewLSM(maxSize int) *LSM {
 	mtx := &sync.Mutex{}
 	l := &LSM{
-		activeMemtable:    NewAVL(),
+		activeMemtable:    NewAVLMemtable(),
 		immutableMemtable: nil,
 		maxSize:           maxSize,
 		sstablesCache:     make(map[string]*SSTable),
@@ -82,7 +82,7 @@ func (lsm *LSM) Insert(key []byte, id, offset int64) error {
 			lsm.flushCond.Wait()
 		}
 		lsm.immutableMemtable = lsm.activeMemtable
-		lsm.activeMemtable = NewAVL()
+		lsm.activeMemtable = NewAVLMemtable()
 		lsm.mtx.Unlock()
 
 		lsm.flushCh <- struct{}{}
@@ -340,5 +340,28 @@ func (lsm *LSM) writeSSTable() error {
 		fmt.Println(err)
 		return err
 	}
+	return nil
+}
+
+func (lsm *LSM) Close() error {
+	for _, sstable := range lsm.sstablesCache {
+		if err := sstable.f.Close(); err != nil {
+			return err
+		}
+	}
+	lsm.mtx.Lock()
+	for lsm.immutableMemtable != nil {
+		lsm.flushCond.Wait()
+	}
+
+	lsm.immutableMemtable = lsm.activeMemtable
+	lsm.flushCh <- struct{}{}
+
+	for lsm.immutableMemtable != nil {
+		lsm.flushCond.Wait()
+	}
+	lsm.mtx.Unlock()
+
+	fmt.Println("Closing memtables")
 	return nil
 }

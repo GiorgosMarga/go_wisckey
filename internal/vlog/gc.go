@@ -40,7 +40,7 @@ func (v *VLog) gc(l *lsm.LSM) error {
 			}
 			return err
 		}
-		lsmEntry, err := l.Get(entry.key)
+		lsmEntry, err := l.Get(entry.Key)
 		if err != nil {
 			return err
 		}
@@ -49,6 +49,6 @@ func (v *VLog) gc(l *lsm.LSM) error {
 			fmt.Println("entry should be deleted")
 		}
 
-		offset += 8 + int64(len(entry.key)+len(entry.val))
+		offset += 8 + int64(len(entry.Key)+len(entry.Val))
 	}
 }

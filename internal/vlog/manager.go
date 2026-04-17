@@ -38,6 +38,16 @@ func NewManager() *Manager {
 	return manager
 }
 
+func (m *Manager) Close() error {
+	for _, vlog := range m.immutable {
+		if err := vlog.Close(); err != nil {
+			return err
+		}
+	}
+
+	return m.active.Close()
+}
+
 func (m *Manager) Append(key, value []byte) (int64, int64, error) {
 	entrySize := len(key) + len(value) + 8 // 2 keysize + 2 valsize + 4 crc
 	// the new entry doesnt fit, create a new active segment and make the current
