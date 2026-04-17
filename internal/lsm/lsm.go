@@ -337,6 +337,7 @@ func (lsm *LSM) writeSSTable() error {
 	}
 
 	if err := os.Rename(id, filename); err != nil {
+		fmt.Println(err)
 		return err
 	}
 	return nil
