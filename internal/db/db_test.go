@@ -7,9 +7,12 @@ import (
 	mathr "math/rand"
 	"os"
 	"testing"
+	"time"
 )
 
 func TestInsertDifferentSizes(t *testing.T) {
+	clearFolders("../../sstables")
+	clearFolders("../../vlogs")
 	defer func() {
 		clearFolders("../../sstables")
 		clearFolders("../../vlogs")
@@ -17,7 +20,7 @@ func TestInsertDifferentSizes(t *testing.T) {
 	db := NewDB()
 
 	entries := make(map[string][]byte)
-	totalEntries := 10_000
+	totalEntries := 100_000
 	for range totalEntries {
 		size := 2<<mathr.Intn(10) + 1
 		key := make([]byte, size)
@@ -45,6 +48,8 @@ func TestInsertDifferentSizes(t *testing.T) {
 }
 
 func TestDB(t *testing.T) {
+	clearFolders("../../sstables")
+	clearFolders("../../vlogs")
 	defer func() {
 		clearFolders("../../sstables")
 		clearFolders("../../vlogs")
@@ -60,6 +65,7 @@ func TestDB(t *testing.T) {
 		rand.Read(value)
 		entries[string(key)] = value
 	}
+	fmt.Println(len(entries))
 
 	for k, v := range entries {
 		if err := db.Insert([]byte(k), v); err != nil {
@@ -76,6 +82,9 @@ func TestDB(t *testing.T) {
 			t.Fatalf("expected %x, got %x\n", targetValue, v)
 		}
 	}
+
+	// reads might happen from the immtuable memtable so there is a chance that the sstable hasnt finished renaming
+	time.Sleep(1 * time.Second)
 }
 
 func clearFolders(path string) {

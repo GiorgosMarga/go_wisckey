@@ -15,6 +15,8 @@ import (
 	sparseindex "github.com/GiorgosMarga/wisckey/internal/sparseIndex"
 )
 
+// BUG: Memtables should be read from most  to least recent
+
 var (
 	h1 = bloomfilter.DefaultHash(0x9747b28c)
 	h2 = bloomfilter.DefaultHash(0x85ebca6b)
@@ -29,11 +31,12 @@ type SSTable struct {
 }
 
 type LSM struct {
-	mtx               *sync.Mutex
 	activeMemtable    Memtable
 	immutableMemtable Memtable
 	sstablesCache     map[string]*SSTable
 	flushCh           chan struct{}
+	rwmtx             *sync.RWMutex
+	mtx               *sync.Mutex // sync with flushLoop
 	flushCond         *sync.Cond
 	maxSize           int
 }
@@ -47,6 +50,7 @@ func NewLSM(maxSize int) *LSM {
 		sstablesCache:     make(map[string]*SSTable),
 		flushCh:           make(chan struct{}, 1),
 		mtx:               mtx,
+		rwmtx:             &sync.RWMutex{},
 		flushCond:         sync.NewCond(mtx),
 	}
 	go l.flushLoop()
@@ -66,12 +70,14 @@ func (lsm *LSM) flushLoop() {
 	}
 }
 
-// TODO: writeSSTable should not block the insert. A new memtable should be available for writing the data
 func (lsm *LSM) Insert(key []byte, id, offset int64) error {
+	lsm.rwmtx.Lock()
+	defer lsm.rwmtx.Unlock()
 	// check if key fits in the lsm
 	if lsm.activeMemtable.Size()+len(key) > lsm.maxSize {
 		// need flush current lsm in disk and create a new one
 		lsm.mtx.Lock()
+		// wait until previous immutable memtable is completely written
 		for lsm.immutableMemtable != nil {
 			lsm.flushCond.Wait()
 		}
@@ -95,6 +101,8 @@ func (lsm *LSM) Insert(key []byte, id, offset int64) error {
 }
 
 func (lsm *LSM) Get(key []byte) (*MemtableEntry, error) {
+	lsm.rwmtx.RLock()
+	defer lsm.rwmtx.RUnlock()
 	// search active
 	entry, err := lsm.activeMemtable.Read(key)
 	if err != nil {
@@ -135,11 +143,15 @@ func (lsm *LSM) Get(key []byte) (*MemtableEntry, error) {
 		exists  bool
 	)
 
-	for _, sstableFile := range sstables {
+	for i := len(sstables) - 1; i >= 0; i-- {
+		sstableFile := sstables[i]
 		// first seatch the cache
 		sstable, exists = lsm.sstablesCache[sstableFile.Name()]
 		if !exists {
 			sstable, err = lsm.openSSTable(fmt.Sprintf("../../sstables/%s", sstableFile.Name()))
+			if err != nil {
+				panic(fmt.Sprintf("Trying to open %s: %s\n", sstableFile.Name(), err))
+			}
 		}
 		entry, err := lsm.searchSSTable(sstable, key)
 		if err != nil {
@@ -258,8 +270,7 @@ func (lsm *LSM) writeSSTable() error {
 	id := fmt.Sprintf("%d", time.Now().UnixMicro())
 	filename := path.Join(
 		"..", "..", "sstables", id)
-
-	f, err := os.OpenFile(filename, os.O_CREATE|os.O_RDWR, 0o666)
+	f, err := os.OpenFile(id, os.O_CREATE|os.O_RDWR, 0o666)
 	if err != nil {
 		return err
 	}
@@ -321,5 +332,13 @@ func (lsm *LSM) writeSSTable() error {
 		sparseIdx:     spIndex,
 		dataEndOffset: uint64(bfOffset),
 	}
-	return f.Sync()
+	if err := f.Sync(); err != nil {
+		return err
+	}
+
+	if err := os.Rename(id, filename); err != nil {
+		fmt.Println(err)
+		return err
+	}
+	return nil
 }

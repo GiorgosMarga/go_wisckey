@@ -11,10 +11,12 @@ type DB struct {
 }
 
 func NewDB() *DB {
-	return &DB{
-		vlogManager: vlog.NewManager(10),
-		lsm:         lsm.NewLSM(8192),
+	db := &DB{
+		vlogManager: vlog.NewManager(),
+		lsm:         lsm.NewLSM(4 * 1024 * 1024),
 	}
+	go db.vlogManager.GC(db.lsm)
+	return db
 }
 
 func (db *DB) Insert(key, value []byte) error {

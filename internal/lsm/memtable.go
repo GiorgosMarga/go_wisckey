@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"sync"
 )
 
 var (
@@ -49,15 +50,20 @@ type AVL struct {
 	root     *node
 	items    int
 	currSize int
+	mtx      *sync.RWMutex
 }
 
 func NewAVL() *AVL {
-	return &AVL{}
+	return &AVL{
+		mtx: &sync.RWMutex{},
+	}
 }
 func (a *AVL) Size() int {
 	return a.currSize
 }
 func (a *AVL) Insert(entry MemtableEntry) error {
+	a.mtx.Lock()
+	defer a.mtx.Unlock()
 	n, err := a.insert(a.root, entry.Key, entry.VLogId, entry.VLogOffset)
 	if err != nil {
 		return err
@@ -119,6 +125,8 @@ func (a *AVL) insert(curr *node, key []byte, id, offset int64) (*node, error) {
 	return curr, nil
 }
 func (a *AVL) Read(key []byte) (*MemtableEntry, error) {
+	a.mtx.RLock()
+	defer a.mtx.RUnlock()
 	curr := a.root
 	// check if entry is in the tree
 	for curr != nil {
@@ -136,6 +144,8 @@ func (a *AVL) Read(key []byte) (*MemtableEntry, error) {
 }
 
 func (a *AVL) GetEntries() []*MemtableEntry {
+	a.mtx.RLock()
+	defer a.mtx.RUnlock()
 	return a.getEntries(a.root, make([]*MemtableEntry, 0, a.items))
 }
 func (a *AVL) getEntries(curr *node, entries []*MemtableEntry) []*MemtableEntry {
