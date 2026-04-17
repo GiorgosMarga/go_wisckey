@@ -15,6 +15,8 @@ import (
 	sparseindex "github.com/GiorgosMarga/wisckey/internal/sparseIndex"
 )
 
+// BUG: Memtables should be read from more recent to least recent
+
 var (
 	h1 = bloomfilter.DefaultHash(0x9747b28c)
 	h2 = bloomfilter.DefaultHash(0x85ebca6b)
@@ -66,7 +68,6 @@ func (lsm *LSM) flushLoop() {
 	}
 }
 
-// TODO: writeSSTable should not block the insert. A new memtable should be available for writing the data
 func (lsm *LSM) Insert(key []byte, id, offset int64) error {
 	// check if key fits in the lsm
 	if lsm.activeMemtable.Size()+len(key) > lsm.maxSize {
@@ -135,11 +136,15 @@ func (lsm *LSM) Get(key []byte) (*MemtableEntry, error) {
 		exists  bool
 	)
 
-	for _, sstableFile := range sstables {
+	for i := len(sstables) - 1; i >= 0; i-- {
+		sstableFile := sstables[i]
 		// first seatch the cache
 		sstable, exists = lsm.sstablesCache[sstableFile.Name()]
 		if !exists {
 			sstable, err = lsm.openSSTable(fmt.Sprintf("../../sstables/%s", sstableFile.Name()))
+			if err != nil {
+				panic(err)
+			}
 		}
 		entry, err := lsm.searchSSTable(sstable, key)
 		if err != nil {

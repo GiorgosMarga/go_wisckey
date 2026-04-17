@@ -14,11 +14,17 @@ var (
 	ErrInvalidCRC = errors.New("invalid crc")
 )
 
+type vlogEntry struct {
+	key []byte
+	val []byte
+}
+
 type VLog struct {
 	f   *os.File
 	mtx *sync.RWMutex
 
 	id   int64
+	tail int64
 	head int64
 }
 
@@ -65,6 +71,14 @@ func (v *VLog) Append(key, value []byte) (int64, error) {
 	return vlogOffset, nil
 }
 func (v *VLog) Read(vLogOffset int64) ([]byte, error) {
+	entry, err := v.readEntry(vLogOffset)
+	if err != nil {
+		return nil, err
+	}
+	return entry.val, nil
+}
+
+func (v *VLog) readEntry(vLogOffset int64) (*vlogEntry, error) {
 	buf := make([]byte, 2)
 
 	// read key
@@ -85,6 +99,8 @@ func (v *VLog) Read(vLogOffset int64) ([]byte, error) {
 	if n != int(keyLen) {
 		return nil, fmt.Errorf("could not read the entire data")
 	}
+
+	// read value
 	n, err = v.f.ReadAt(buf, vLogOffset+readOffset)
 	if err != nil {
 		return nil, err
@@ -99,6 +115,7 @@ func (v *VLog) Read(vLogOffset int64) ([]byte, error) {
 	}
 	readOffset += int64(n)
 
+	// read crc
 	crcBuf := make([]byte, 4)
 	_, err = v.f.ReadAt(crcBuf, vLogOffset+readOffset)
 	crc := binary.LittleEndian.Uint32(crcBuf)
@@ -109,5 +126,8 @@ func (v *VLog) Read(vLogOffset int64) ([]byte, error) {
 	if crc != crc32.ChecksumIEEE(append(key, value...)) {
 		return nil, ErrInvalidCRC
 	}
-	return value, nil
+	return &vlogEntry{
+		key: key,
+		val: value,
+	}, nil
 }

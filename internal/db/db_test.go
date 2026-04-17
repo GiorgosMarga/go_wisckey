@@ -10,6 +10,8 @@ import (
 )
 
 func TestInsertDifferentSizes(t *testing.T) {
+	clearFolders("../../sstables")
+	clearFolders("../../vlogs")
 	defer func() {
 		clearFolders("../../sstables")
 		clearFolders("../../vlogs")
@@ -17,7 +19,7 @@ func TestInsertDifferentSizes(t *testing.T) {
 	db := NewDB()
 
 	entries := make(map[string][]byte)
-	totalEntries := 10_000
+	totalEntries := 100_000
 	for range totalEntries {
 		size := 2<<mathr.Intn(10) + 1
 		key := make([]byte, size)
@@ -45,6 +47,8 @@ func TestInsertDifferentSizes(t *testing.T) {
 }
 
 func TestDB(t *testing.T) {
+	clearFolders("../../sstables")
+	clearFolders("../../vlogs")
 	defer func() {
 		clearFolders("../../sstables")
 		clearFolders("../../vlogs")
