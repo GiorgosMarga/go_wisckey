@@ -20,12 +20,10 @@ type vlogEntry struct {
 }
 
 type VLog struct {
-	f   *os.File
-	mtx *sync.RWMutex
-
+	f    *os.File
+	mtx  *sync.RWMutex
+	size int64
 	id   int64
-	tail int64
-	head int64
 }
 
 func NewVLog(id int64) (*VLog, error) {
@@ -37,20 +35,19 @@ func NewVLog(id int64) (*VLog, error) {
 	}
 
 	return &VLog{
-		f:    f,
-		mtx:  &sync.RWMutex{},
-		id:   id,
-		head: 0,
+		f:   f,
+		mtx: &sync.RWMutex{},
+		id:  id,
 	}, nil
 }
 
 func (v *VLog) Append(key, value []byte) (int64, error) {
 	v.mtx.Lock()
 	defer v.mtx.Unlock()
-
+	entrySize := 8 + len(key) + len(value)
 	crc := crc32.ChecksumIEEE(append(key, value...))
 
-	buf := make([]byte, 8+len(key)+len(value)) // keysize 2 + valsize 2 + crc 4
+	buf := make([]byte, entrySize) // keysize 2 + valsize 2 + crc 4
 	offset := 0
 	binary.LittleEndian.PutUint16(buf[offset:], uint16(len(key)))
 	offset += 2
@@ -62,12 +59,12 @@ func (v *VLog) Append(key, value []byte) (int64, error) {
 	offset += len(value)
 	binary.LittleEndian.PutUint32(buf[offset:], crc)
 
-	vlogOffset := v.head
-	if _, err := v.f.WriteAt(buf, v.head); err != nil {
+	vlogOffset := v.size
+	if _, err := v.f.Write(buf); err != nil {
 		return 0, err
 	}
 
-	v.head += int64(len(buf))
+	v.size += int64(entrySize)
 	return vlogOffset, nil
 }
 func (v *VLog) Read(vLogOffset int64) ([]byte, error) {

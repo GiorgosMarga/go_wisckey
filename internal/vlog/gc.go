@@ -1,34 +1,43 @@
 package vlog
 
 import (
+	"errors"
 	"fmt"
-	"sync"
+	"io"
+	"math"
 	"time"
 
 	"github.com/GiorgosMarga/wisckey/internal/lsm"
 )
 
 func (m *Manager) GC(l *lsm.LSM) {
-	wg := sync.WaitGroup{}
-	for range time.After(1 * time.Second) {
-		fmt.Println("GC running...")
-		for _, vlog := range m.immutable {
-			wg.Go(func() {
-				if err := vlog.gc(l); err != nil {
-					fmt.Printf("error cleaning immutable vlog %d: %s\n", vlog.id, err)
-				}
-			})
+	for range time.Tick(5 * time.Second) {
+		if m.minVLogId != math.MaxInt64 && m.minVLogId != m.vlogId {
+			oldestVlog, exists := m.immutable[m.minVLogId]
+			if !exists {
+				fmt.Printf("[GC]: vLog with id %d doesnt exist\n", m.minVLogId)
+				continue
+			}
+			if err := oldestVlog.gc(l); err != nil {
+				fmt.Println(err)
+				continue
+			}
+			m.mtx.Lock()
+			m.minVLogId += 1
+			m.mtx.Unlock()
 		}
-		wg.Wait()
-		fmt.Println("GC finished...")
 	}
 
 }
 
 func (v *VLog) gc(l *lsm.LSM) error {
-	for v.tail < v.head {
-		entry, err := v.readEntry(v.tail)
+	var offset int64 = 0
+	for {
+		entry, err := v.readEntry(offset)
 		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
 			return err
 		}
 		lsmEntry, err := l.Get(entry.key)
@@ -36,12 +45,10 @@ func (v *VLog) gc(l *lsm.LSM) error {
 			return err
 		}
 
-		if lsmEntry.VLogOffset != v.tail {
+		if lsmEntry.VLogOffset != offset {
 			fmt.Println("entry should be deleted")
 		}
 
-		v.tail += 8 + int64(len(entry.key)+len(entry.val))
+		offset += 8 + int64(len(entry.key)+len(entry.val))
 	}
-	fmt.Println("finished ", v.id)
-	return nil
 }

@@ -2,6 +2,7 @@ package vlog
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"sync"
 )
@@ -9,6 +10,7 @@ import (
 type Manager struct {
 	maxCapacity int64
 	vlogId      int64
+	minVLogId   int64 // the vlog id that will be GCed in the GC round
 	active      *VLog
 	mtx         *sync.Mutex
 	immutable   map[int64]*VLog // GC can clear these if all entries are deleted
@@ -25,6 +27,7 @@ func NewManager() *Manager {
 		vlogId:      int64(len(dir)),
 		immutable:   make(map[int64]*VLog),
 		mtx:         &sync.Mutex{},
+		minVLogId:   math.MaxInt64,
 	}
 
 	activeVlog, err := NewVLog(manager.vlogId)
@@ -39,10 +42,11 @@ func (m *Manager) Append(key, value []byte) (int64, int64, error) {
 	entrySize := len(key) + len(value) + 8 // 2 keysize + 2 valsize + 4 crc
 	// the new entry doesnt fit, create a new active segment and make the current
 	// immutable
-	if m.active.head+int64(entrySize) > m.maxCapacity {
+	if m.active.size+int64(entrySize) > m.maxCapacity {
 		m.mtx.Lock()
 		m.immutable[m.vlogId] = m.active
 		m.active, _ = NewVLog(m.vlogId + 1)
+		m.minVLogId = min(m.minVLogId, m.vlogId)
 		m.vlogId++
 		m.mtx.Unlock()
 	}
